@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2009-2017, Intel Corporation
+* Copyright (c) 2009-2018, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -1661,11 +1661,7 @@ MOS_STATUS Mos_Specific_AllocateResource(
         }
 
         MosMemAllocCounterGfx = GraphicsResource::GetMemAllocCounterGfx();
-
-        MOS_OS_VERBOSEMESSAGE("<MemNinjaLastFuncCall osInterface = \"%d\" memPtr = \"%d\" functionName = \"%s\" filename = \"%s\" memType = \"Gfx\" line = \"%d\"/>.",
-            pOsInterface, pOsResource->pGmmResInfo, functionName, filename, line);
-        MOS_OS_VERBOSEMESSAGE("<MemNinjaAlloc osInterface = \"%d\" component = \"%d\" memType = \"Gfx\" size = \"%d\" memPtr = \"%d\" bufName = \"%s\"/>.",
-            pOsInterface, pOsInterface->Component, GmmResGetRenderSize(pOsResource->pGmmResInfo), pOsResource->pGmmResInfo, pParams->pBufName);
+        MOS_MEMNINJA_GFX_ALLOC_MESSAGE(pOsResource->pGmmResInfo, GmmResGetRenderSize(pOsResource->pGmmResInfo), functionName, filename, line);
 
         return eStatus;
     }
@@ -1864,13 +1860,8 @@ MOS_STATUS Mos_Specific_AllocateResource(
         eStatus = MOS_STATUS_NO_SPACE;
     }
 
-    MOS_OS_VERBOSEMESSAGE("<MemNinjaLastFuncCall osInterface = \"%d\" memPtr = \"%d\" functionName = \"%s\" filename = \"%s\" memType = \"Gfx\" line = \"%d\"/>.",
-        pOsInterface, pOsResource->pGmmResInfo, functionName, filename, line);
-
-    MOS_OS_VERBOSEMESSAGE("<MemNinjaAlloc osInterface = \"%d\" component = \"%d\" memType = \"Gfx\" size = \"%d\" memPtr = \"%d\" bufName = \"%s\"/>.",
-        pOsInterface, pOsInterface->Component, GmmResGetRenderSize(pOsResource->pGmmResInfo), pGmmResourceInfo, pParams->pBufName);
-
     MosMemAllocCounterGfx++;
+    MOS_MEMNINJA_GFX_ALLOC_MESSAGE(pOsResource->pGmmResInfo, GmmResGetRenderSize(pOsResource->pGmmResInfo), functionName, filename, line);
 
 finish:
     return eStatus;
@@ -2031,6 +2022,11 @@ finish:
 //!
 void Mos_Specific_FreeResource(
     PMOS_INTERFACE   pOsInterface,
+#if MOS_MESSAGES_ENABLED
+    PCCHAR           functionName,
+    PCCHAR           filename,
+    int32_t          line,
+#endif // MOS_MESSAGES_ENABLED
     PMOS_RESOURCE    pOsResource)
 {
     MOS_OS_FUNCTION_ENTER;
@@ -2081,10 +2077,8 @@ void Mos_Specific_FreeResource(
         MOS_Delete(pOsResource->pGfxResource);
         pOsResource->pGfxResource = nullptr;
 
-        MOS_OS_NORMALMESSAGE("<MemNinjaFree osInterface = \"%d\" component = \"%d\" memType = \"Gfx\" memPtr = \"%d\" />.",
-            pOsInterface, pOsInterface->Component, pOsResource->pGmmResInfo);
-
         MosMemAllocCounterGfx = GraphicsResource::GetMemAllocCounterGfx();
+        MOS_MEMNINJA_GFX_FREE_MESSAGE(pOsResource->pGmmResInfo, functionName, filename, line);
         MOS_ZeroMemory(pOsResource, sizeof(*pOsResource));
         return;
     }
@@ -2110,12 +2104,11 @@ void Mos_Specific_FreeResource(
         pOsResource->bo = nullptr;
         if (nullptr != pOsResource->pGmmResInfo)
         {
-            MOS_OS_NORMALMESSAGE("<MemNinjaFree osInterface = \"%d\" component = \"%d\" memType = \"Gfx\" memPtr = \"%d\" />.",
-                pOsInterface, pOsInterface->Component, pOsResource->pGmmResInfo);
+            MosMemAllocCounterGfx--;
+            MOS_MEMNINJA_GFX_FREE_MESSAGE(pOsResource->pGmmResInfo, functionName, filename, line);
+
             pOsInterface->pOsContext->pGmmClientContext->DestroyResInfoObject(pOsResource->pGmmResInfo);
             pOsResource->pGmmResInfo = nullptr;
-
-            MosMemAllocCounterGfx--;
         }
     }
 
@@ -2135,10 +2128,20 @@ void Mos_Specific_FreeResource(
 void Mos_Specific_FreeResourceWithFlag(
     PMOS_INTERFACE    pOsInterface,
     PMOS_RESOURCE     pOsResource,
+#if MOS_MESSAGES_ENABLED
+    PCCHAR            functionName,
+    PCCHAR            filename,
+    int32_t           line,
+#endif // MOS_MESSAGES_ENABLED
     uint32_t          uiFlag)
 {
     MOS_UNUSED(uiFlag);
+
+#if MOS_MESSAGES_ENABLED
+    Mos_Specific_FreeResource(pOsInterface, functionName, filename, line, pOsResource);
+#else
     Mos_Specific_FreeResource(pOsInterface, pOsResource);
+#endif // MOS_MESSAGES_ENABLED
 }
 
 //!
@@ -5527,6 +5530,7 @@ MOS_STATUS Mos_Specific_InitInterface(
     PMOS_OS_CONTEXT                 pOsContext;
     PMOS_USER_FEATURE_INTERFACE     pOsUserFeatureInterface;
     MOS_STATUS                      eStatus;
+    MediaFeatureTable              *pSkuTable;
     MOS_USER_FEATURE_VALUE_DATA     UserFeatureData;
     int32_t                         iDeviceId;
     uint32_t                        dwResetCount;
@@ -5710,6 +5714,9 @@ MOS_STATUS Mos_Specific_InitInterface(
     pOsInterface->pfnGetAuxTableBaseAddr                    = Mos_Specific_GetAuxTableBaseAddr;
     pOsInterface->pfnSetSliceCount                          = Mos_Specific_SetSliceCount;
     pOsInterface->pfnGetResourceIndex                       = Mos_Specific_GetResourceIndex;
+    pOsInterface->pfnSetSliceCount                          = Mos_Specific_SetSliceCount;
+    pOsInterface->pfnIsSetMarkerEnabled                     = Mos_Specific_IsSetMarkerEnabled;
+    pOsInterface->pfnGetMarkerResource                      = Mos_Specific_GetMarkerResource;
 
     pOsUserFeatureInterface->bIsNotificationSupported   = false;
     pOsUserFeatureInterface->pOsInterface               = pOsInterface;
@@ -5742,16 +5749,12 @@ MOS_STATUS Mos_Specific_InitInterface(
     }
     pOsInterface->pOsExt            = nullptr;
 
-#if (_DEBUG || _RELEASE_INTERNAL)
-    // user feature detect if simulation environment (HAS) is enabled
-    pOsInterface->bSimIsActive = 0;
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __MEDIA_USER_FEATURE_VALUE_CODEC_SIM_ENABLE_ID,
-        &UserFeatureData);
-    pOsInterface->bSimIsActive = (int32_t)UserFeatureData.i32Data;
+    // Check SKU table to detect if simulation environment (HAS) is enabled
+    pSkuTable = pOsInterface->pfnGetSkuTable(pOsInterface);
+    MOS_OS_CHK_NULL(pSkuTable);
+    pOsInterface->bSimIsActive = MEDIA_IS_SKU(pSkuTable, FtrSimulationMode);
 
+#if (_DEBUG || _RELEASE_INTERNAL)
     // read the "Force VDBOX" user feature key
     // 0: not force
     MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
@@ -5924,4 +5927,32 @@ void Mos_Specific_SetResourceFormat(
     MOS_OS_ASSERT(pOsResource);
 
     pOsResource->Format = mosFormat;
+}
+
+//!
+//! \brief    Get SetMarker enabled flag
+//! \details  Get SetMarker enabled flag from OsInterface
+//! \param    PMOS_INTERFACE pOsInterface
+//!           [in] OS Interface
+//! \return   bool
+//!           SetMarker enabled flag
+//!
+bool Mos_Specific_IsSetMarkerEnabled(
+    PMOS_INTERFACE         pOsInterface)
+{
+    return false;
+}
+
+//!
+//! \brief    Get SetMarker resource address
+//! \details  Get SetMarker resource address from OsInterface
+//! \param    PMOS_INTERFACE pOsInterface
+//!           [in] OS Interface
+//! \return   PMOS_RESOURCE
+//!           SetMarker resource address
+//!
+PMOS_RESOURCE Mos_Specific_GetMarkerResource(
+    PMOS_INTERFACE         pOsInterface)
+{
+    return 0;
 }
